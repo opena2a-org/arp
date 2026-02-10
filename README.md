@@ -181,7 +181,7 @@ npm test          # 18 unit tests
 npm run build     # TypeScript compilation
 ```
 
-For comprehensive security testing, see [arp-lab](https://github.com/opena2a-org/arp-lab) (182 tests across 42 files).
+For comprehensive security testing, see [OASB](https://github.com/opena2a-org/oasb) (182 tests across 42 files, mapped to MITRE ATLAS).
 
 ## License
 
