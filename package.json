@@ -1,6 +1,6 @@
 {
   "name": "@opena2a/arp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent Runtime Protection — LLM-assisted behavioral monitoring, anomaly detection, and enforcement for AI agents.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
