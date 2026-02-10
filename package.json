@@ -47,6 +47,14 @@
     "edr",
     "opena2a"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/opena2a-org/arp.git"
+  },
+  "homepage": "https://github.com/opena2a-org/arp",
+  "bugs": {
+    "url": "https://github.com/opena2a-org/arp/issues"
+  },
   "author": "OpenA2A",
   "license": "Apache-2.0",
   "engines": {
