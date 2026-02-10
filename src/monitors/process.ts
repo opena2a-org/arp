@@ -1,5 +1,6 @@
 import { execSync } from 'child_process';
 import * as os from 'os';
+import * as path from 'path';
 import type { Monitor, MonitorType, ARPEvent } from '../types';
 import type { EventEngine } from '../engine/event-engine';
 
@@ -11,6 +12,13 @@ interface ProcessInfo {
   cpu: number;
   mem: number;
 }
+
+/** Binaries commonly used for exfiltration, lateral movement, or exploitation */
+const SUSPICIOUS_BINARIES = [
+  'curl', 'wget', 'nc', 'ncat', 'nmap', 'ssh', 'scp',
+  'python', 'python3', 'perl', 'ruby', 'base64',
+  'socat', 'telnet', 'ftp', 'rsync',
+];
 
 /**
  * Process monitor — tracks agent lifecycle, child processes, and resource usage.
@@ -82,10 +90,22 @@ export class ProcessMonitor implements Monitor {
         }
       }
 
-      // Check for suspicious processes (high CPU, unexpected users)
+      // Check for suspicious processes (binaries, high CPU, unexpected users)
       for (const pid of currentPids) {
         const info = this.getProcessInfo(pid);
         if (!info) continue;
+
+        // Suspicious binary detection
+        const binaryName = path.basename(info.command.split(/\s+/)[0]);
+        if (SUSPICIOUS_BINARIES.includes(binaryName)) {
+          this.engine.emit({
+            source: 'process',
+            category: 'violation',
+            severity: 'high',
+            description: `Suspicious binary executed: ${binaryName} (PID ${pid})`,
+            data: { pid, binary: binaryName, command: info.command, user: info.user },
+          });
+        }
 
         // High CPU for extended period
         if (info.cpu > 90) {

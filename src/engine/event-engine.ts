@@ -70,6 +70,15 @@ export class EventEngine {
     // Evaluate rules
     const matchedRules = this.evaluateRules(fullEvent);
     for (const rule of matchedRules) {
+      // If rule requires LLM confirmation, emit a pending-confirmation event
+      // and skip immediate enforcement (L2 will handle it later)
+      if (rule.requireLlmConfirmation) {
+        fullEvent.data._pendingConfirmation = true;
+        fullEvent.data._pendingAction = rule.action;
+        fullEvent.data._pendingRule = rule.name;
+        continue;
+      }
+
       const result: EnforcementResult = {
         action: rule.action as EnforcementAction,
         success: true,

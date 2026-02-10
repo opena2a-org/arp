@@ -8,6 +8,8 @@ const SENSITIVE_PATHS = [
   '.ssh', '.aws', '.gnupg', '.kube', '.config/gcloud',
   '.docker/config.json', '.npmrc', '.pypirc',
   '.git-credentials', 'wallet.json',
+  '.bashrc', '.zshrc', '.bash_profile', '.profile',
+  '.gitconfig', '.env', '.netrc', '.pgpass',
 ];
 
 /**

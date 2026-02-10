@@ -30,7 +30,7 @@ export { AnthropicAdapter, OpenAIAdapter, OllamaAdapter, createAdapter, autoDete
 export { ProcessMonitor } from './monitors/process';
 export { NetworkMonitor } from './monitors/network';
 export { FilesystemMonitor } from './monitors/filesystem';
-export { EnforcementEngine } from './enforcement/kill-switch';
+export { EnforcementEngine, type AlertCallback } from './enforcement/kill-switch';
 export { LocalLogger } from './reporting/local-log';
 export { loadConfig, defaultConfig } from './config/loader';
 
@@ -38,7 +38,7 @@ import * as path from 'path';
 import type { ARPConfig, ARPEvent, Monitor } from './types';
 import { EventEngine } from './engine/event-engine';
 import { IntelligenceCoordinator } from './intelligence/coordinator';
-import { EnforcementEngine } from './enforcement/kill-switch';
+import { EnforcementEngine, type AlertCallback } from './enforcement/kill-switch';
 import { LocalLogger } from './reporting/local-log';
 import { ProcessMonitor } from './monitors/process';
 import { NetworkMonitor } from './monitors/network';
@@ -160,8 +160,28 @@ export class AgentRuntimeProtection {
     return this.enforcement.resume(pid);
   }
 
+  /** Subscribe to all ARP events (for external integrations, test harnesses, etc.) */
+  onEvent(handler: (event: ARPEvent) => void | Promise<void>): void {
+    this.engine.onEvent(handler);
+  }
+
+  /** Subscribe to all enforcement results */
+  onEnforcement(handler: (result: import('./types').EnforcementResult) => void | Promise<void>): void {
+    this.engine.onEnforcement(handler);
+  }
+
+  /** Set the alert callback for the enforcement engine */
+  setAlertCallback(callback: AlertCallback): void {
+    this.enforcement.setAlertCallback(callback);
+  }
+
   /** Get the event engine (for custom integrations) */
   getEngine(): EventEngine {
     return this.engine;
+  }
+
+  /** Get the enforcement engine (for test harnesses) */
+  getEnforcement(): EnforcementEngine {
+    return this.enforcement;
   }
 }

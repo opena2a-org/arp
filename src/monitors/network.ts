@@ -93,7 +93,9 @@ export class NetworkMonitor implements Monitor {
         if (!this.knownDestinations.has(dest)) {
           const isAllowed = this.allowedHosts.size === 0 ||
             this.allowedHosts.has(conn.remoteAddr) ||
-            Array.from(this.allowedHosts).some((h) => conn.remoteAddr.endsWith(h));
+            Array.from(this.allowedHosts).some((h) =>
+              conn.remoteAddr === h || conn.remoteAddr.endsWith('.' + h)
+            );
 
           this.engine.emit({
             source: 'network',
