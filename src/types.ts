@@ -59,6 +59,8 @@ export interface ARPConfig {
   rules?: AlertRule[];
   /** Intelligence layer configuration */
   intelligence?: IntelligenceConfig;
+  /** Application-level interceptors (zero-latency, 100% accuracy) */
+  interceptors?: InterceptorConfig;
 }
 
 export interface MonitorConfig {
@@ -67,6 +69,16 @@ export interface MonitorConfig {
   filesystem?: { enabled: boolean; watchPaths?: string[]; allowedPaths?: string[] };
   skill?: { enabled: boolean };
   heartbeat?: { enabled: boolean; expectedUrl?: string; maxStaleMs?: number };
+}
+
+/** Interceptor configuration — application-level hooks for zero-latency detection */
+export interface InterceptorConfig {
+  /** Hook child_process module for process spawn interception */
+  process?: { enabled: boolean };
+  /** Hook net.Socket for outbound connection interception */
+  network?: { enabled: boolean; allowedHosts?: string[] };
+  /** Hook fs module for file operation interception */
+  filesystem?: { enabled: boolean; allowedPaths?: string[] };
 }
 
 export interface AlertRule {

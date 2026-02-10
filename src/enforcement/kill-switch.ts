@@ -1,11 +1,23 @@
 import type { EnforcementAction, EnforcementResult, ARPEvent } from '../types';
 
+export type AlertCallback = (event: ARPEvent, result: EnforcementResult) => void | Promise<void>;
+
 /**
  * Enforcement engine — executes actions on agent processes.
  * Supports: log, alert, pause (SIGSTOP), kill (SIGTERM → SIGKILL).
  */
 export class EnforcementEngine {
   private paused = new Set<number>();
+  private onAlert?: AlertCallback;
+
+  constructor(onAlert?: AlertCallback) {
+    this.onAlert = onAlert;
+  }
+
+  /** Register or replace the alert callback */
+  setAlertCallback(callback: AlertCallback): void {
+    this.onAlert = callback;
+  }
 
   /** Execute an enforcement action */
   async execute(action: EnforcementAction, event: ARPEvent, targetPid?: number): Promise<EnforcementResult> {
@@ -15,8 +27,13 @@ export class EnforcementEngine {
       case 'log':
         return { action, success: true, reason: 'Event logged', event };
 
-      case 'alert':
-        return { action, success: true, reason: `Alert raised: ${event.description}`, event };
+      case 'alert': {
+        const result: EnforcementResult = { action, success: true, reason: `Alert raised: ${event.description}`, event };
+        if (this.onAlert) {
+          try { await this.onAlert(event, result); } catch { /* callback errors don't block enforcement */ }
+        }
+        return result;
+      }
 
       case 'pause':
         return this.pauseProcess(pid, event);

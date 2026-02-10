@@ -1,4 +1,5 @@
 import { execSync } from 'child_process';
+import * as fs from 'fs';
 import * as os from 'os';
 import type { Monitor, MonitorType } from '../types';
 import type { EventEngine } from '../engine/event-engine';
@@ -93,7 +94,9 @@ export class NetworkMonitor implements Monitor {
         if (!this.knownDestinations.has(dest)) {
           const isAllowed = this.allowedHosts.size === 0 ||
             this.allowedHosts.has(conn.remoteAddr) ||
-            Array.from(this.allowedHosts).some((h) => conn.remoteAddr.endsWith(h));
+            Array.from(this.allowedHosts).some((h) =>
+              conn.remoteAddr === h || conn.remoteAddr.endsWith('.' + h)
+            );
 
           this.engine.emit({
             source: 'network',
@@ -119,15 +122,20 @@ export class NetworkMonitor implements Monitor {
 
   private getConnections(): Connection[] {
     const platform = os.platform();
-    try {
-      if (platform === 'darwin') {
-        return this.parseLsof();
-      } else {
-        return this.parseSs();
-      }
-    } catch {
-      return [];
+
+    if (platform === 'darwin') {
+      // macOS: try lsof first, fall back to netstat
+      const lsof = this.parseLsof();
+      if (lsof.length > 0) return lsof;
+      return this.parseNetstat();
     }
+
+    // Linux: try ss first, fall back to /proc/net/tcp, then netstat
+    const ss = this.parseSs();
+    if (ss.length > 0) return ss;
+    const proc = this.parseProcNetTcp();
+    if (proc.length > 0) return proc;
+    return this.parseNetstat();
   }
 
   private parseLsof(): Connection[] {
@@ -192,5 +200,107 @@ export class NetworkMonitor implements Monitor {
       // ss not available
     }
     return connections;
+  }
+
+  /** Parse /proc/net/tcp (Linux) — no external tools required */
+  private parseProcNetTcp(): Connection[] {
+    const connections: Connection[] = [];
+    try {
+      const content = fs.readFileSync('/proc/net/tcp', 'utf-8');
+      for (const line of content.trim().split('\n').slice(1)) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 4) continue;
+
+        const state = parseInt(parts[3], 16);
+        if (state !== 1) continue; // 01 = ESTABLISHED
+
+        const local = this.parseHexAddr(parts[1]);
+        const remote = this.parseHexAddr(parts[2]);
+        if (!local || !remote) continue;
+
+        connections.push({
+          protocol: 'tcp',
+          localAddr: local.addr,
+          localPort: local.port,
+          remoteAddr: remote.addr,
+          remotePort: remote.port,
+          state: 'ESTABLISHED',
+        });
+      }
+    } catch {
+      // /proc/net/tcp not available (macOS, containers without /proc)
+    }
+    return connections;
+  }
+
+  /** Parse hex address:port from /proc/net/tcp (e.g., "0100007F:0050") */
+  private parseHexAddr(hexPair: string): { addr: string; port: number } | null {
+    const [hexAddr, hexPort] = hexPair.split(':');
+    if (!hexAddr || !hexPort) return null;
+
+    const port = parseInt(hexPort, 16);
+    const addrNum = parseInt(hexAddr, 16);
+    // /proc/net/tcp stores addresses in little-endian
+    const addr = [
+      addrNum & 0xff,
+      (addrNum >> 8) & 0xff,
+      (addrNum >> 16) & 0xff,
+      (addrNum >> 24) & 0xff,
+    ].join('.');
+
+    return { addr, port };
+  }
+
+  /** Parse netstat output — available on most systems as last resort */
+  private parseNetstat(): Connection[] {
+    const connections: Connection[] = [];
+    try {
+      const output = execSync(
+        'netstat -an 2>/dev/null | grep ESTABLISHED',
+        { encoding: 'utf-8', timeout: 5000 },
+      );
+
+      for (const line of output.trim().split('\n')) {
+        if (!line) continue;
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 5) continue;
+
+        const proto = parts[0];
+        if (!proto.startsWith('tcp')) continue;
+
+        const localParts = this.splitAddrPort(parts[3]);
+        const remoteParts = this.splitAddrPort(parts[4]);
+        if (!localParts || !remoteParts) continue;
+
+        connections.push({
+          protocol: 'tcp',
+          localAddr: localParts.addr,
+          localPort: localParts.port,
+          remoteAddr: remoteParts.addr,
+          remotePort: remoteParts.port,
+          state: 'ESTABLISHED',
+        });
+      }
+    } catch {
+      // netstat not available
+    }
+    return connections;
+  }
+
+  /** Split "addr.port" or "addr:port" into components */
+  private splitAddrPort(value: string): { addr: string; port: number } | null {
+    // Try colon separator first (Linux netstat, IPv6)
+    const colonIdx = value.lastIndexOf(':');
+    if (colonIdx > 0) {
+      const port = parseInt(value.slice(colonIdx + 1));
+      if (!isNaN(port)) return { addr: value.slice(0, colonIdx), port };
+    }
+    // macOS netstat uses dot separator: "127.0.0.1.8080"
+    const dotIdx = value.lastIndexOf('.');
+    if (dotIdx > 0) {
+      const port = parseInt(value.slice(dotIdx + 1));
+      if (!isNaN(port)) return { addr: value.slice(0, dotIdx), port };
+    }
+    return null;
   }
 }

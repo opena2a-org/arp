@@ -16,6 +16,7 @@ export type {
   AlertRule,
   AlertCondition,
   MonitorConfig,
+  InterceptorConfig,
   EnforcementAction,
   EnforcementResult,
   Monitor,
@@ -30,7 +31,10 @@ export { AnthropicAdapter, OpenAIAdapter, OllamaAdapter, createAdapter, autoDete
 export { ProcessMonitor } from './monitors/process';
 export { NetworkMonitor } from './monitors/network';
 export { FilesystemMonitor } from './monitors/filesystem';
-export { EnforcementEngine } from './enforcement/kill-switch';
+export { ProcessInterceptor } from './interceptors/process';
+export { NetworkInterceptor } from './interceptors/network';
+export { FilesystemInterceptor } from './interceptors/filesystem';
+export { EnforcementEngine, type AlertCallback } from './enforcement/kill-switch';
 export { LocalLogger } from './reporting/local-log';
 export { loadConfig, defaultConfig } from './config/loader';
 
@@ -38,11 +42,14 @@ import * as path from 'path';
 import type { ARPConfig, ARPEvent, Monitor } from './types';
 import { EventEngine } from './engine/event-engine';
 import { IntelligenceCoordinator } from './intelligence/coordinator';
-import { EnforcementEngine } from './enforcement/kill-switch';
+import { EnforcementEngine, type AlertCallback } from './enforcement/kill-switch';
 import { LocalLogger } from './reporting/local-log';
 import { ProcessMonitor } from './monitors/process';
 import { NetworkMonitor } from './monitors/network';
 import { FilesystemMonitor } from './monitors/filesystem';
+import { ProcessInterceptor } from './interceptors/process';
+import { NetworkInterceptor } from './interceptors/network';
+import { FilesystemInterceptor } from './interceptors/filesystem';
 import { loadConfig } from './config/loader';
 
 /**
@@ -105,6 +112,18 @@ export class AgentRuntimeProtection {
     if (mc?.filesystem?.enabled !== false) {
       this.monitors.push(new FilesystemMonitor(this.engine, mc?.filesystem?.watchPaths, mc?.filesystem?.allowedPaths));
     }
+
+    // Create interceptors (application-level hooks — zero latency, 100% accuracy)
+    const ic = this.config.interceptors;
+    if (ic?.process?.enabled) {
+      this.monitors.push(new ProcessInterceptor(this.engine));
+    }
+    if (ic?.network?.enabled) {
+      this.monitors.push(new NetworkInterceptor(this.engine, ic.network.allowedHosts));
+    }
+    if (ic?.filesystem?.enabled) {
+      this.monitors.push(new FilesystemInterceptor(this.engine, ic.filesystem.allowedPaths, [dataDir]));
+    }
   }
 
   /** Start all monitors */
@@ -160,8 +179,28 @@ export class AgentRuntimeProtection {
     return this.enforcement.resume(pid);
   }
 
+  /** Subscribe to all ARP events (for external integrations, test harnesses, etc.) */
+  onEvent(handler: (event: ARPEvent) => void | Promise<void>): void {
+    this.engine.onEvent(handler);
+  }
+
+  /** Subscribe to all enforcement results */
+  onEnforcement(handler: (result: import('./types').EnforcementResult) => void | Promise<void>): void {
+    this.engine.onEnforcement(handler);
+  }
+
+  /** Set the alert callback for the enforcement engine */
+  setAlertCallback(callback: AlertCallback): void {
+    this.enforcement.setAlertCallback(callback);
+  }
+
   /** Get the event engine (for custom integrations) */
   getEngine(): EventEngine {
     return this.engine;
+  }
+
+  /** Get the enforcement engine (for test harnesses) */
+  getEnforcement(): EnforcementEngine {
+    return this.enforcement;
   }
 }
