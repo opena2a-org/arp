@@ -38,8 +38,8 @@ export class ProcessMonitor implements Monitor {
   }
 
   async start(): Promise<void> {
-    this.agentPid = process.ppid; // The agent that launched ARP
-    this.knownPids = new Set(this.getChildPids(this.agentPid));
+    this.agentPid = process.pid; // Monitor children of the current (agent) process
+    this.knownPids = new Set(this.getDescendantPids(this.agentPid));
 
     this.timer = setInterval(() => this.poll(), this.intervalMs);
     if (this.timer.unref) this.timer.unref();
@@ -58,7 +58,7 @@ export class ProcessMonitor implements Monitor {
 
   private poll(): void {
     try {
-      const currentPids = this.getChildPids(this.agentPid);
+      const currentPids = this.getDescendantPids(this.agentPid);
       const currentSet = new Set(currentPids);
 
       // Detect new child processes
@@ -136,18 +136,35 @@ export class ProcessMonitor implements Monitor {
     }
   }
 
-  private getChildPids(parentPid?: number): number[] {
+  /** Walk the full process tree to find all descendants of parentPid.
+   *  Uses `ps -ax -o pid=,ppid=` which works on both macOS and Linux. */
+  private getDescendantPids(parentPid?: number): number[] {
     if (!parentPid) return [];
     try {
-      const platform = os.platform();
-      let cmd: string;
-      if (platform === 'darwin') {
-        cmd = `ps -o pid= -g ${parentPid}`;
-      } else {
-        cmd = `ps -o pid= --ppid ${parentPid}`;
+      const output = execSync('ps -ax -o pid=,ppid=', { encoding: 'utf-8', timeout: 5000 });
+      const childMap = new Map<number, number[]>();
+
+      for (const line of output.trim().split('\n')) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parseInt(parts[0]);
+        const ppid = parseInt(parts[1]);
+        if (isNaN(pid) || isNaN(ppid)) continue;
+        if (!childMap.has(ppid)) childMap.set(ppid, []);
+        childMap.get(ppid)!.push(pid);
       }
-      const output = execSync(cmd, { encoding: 'utf-8', timeout: 5000 });
-      return output.trim().split('\n').map((s) => parseInt(s.trim())).filter((n) => !isNaN(n) && n !== parentPid);
+
+      // BFS from parentPid
+      const result: number[] = [];
+      const queue = [parentPid];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const child of childMap.get(current) ?? []) {
+          result.push(child);
+          queue.push(child);
+        }
+      }
+
+      return result;
     } catch {
       return [];
     }
