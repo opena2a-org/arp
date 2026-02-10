@@ -1,37 +1,35 @@
 # ARP — Agent Runtime Protection
 
-Runtime security monitoring for AI agents. Detects process spawns, network connections, and filesystem access in real-time with zero-latency application-level interception.
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Tests](https://img.shields.io/badge/tests-18%20passing-brightgreen)](https://github.com/opena2a-org/arp)
+[![OASB](https://img.shields.io/badge/OASB-182%20tests-teal)](https://github.com/opena2a-org/oasb)
 
-## Architecture
+**Detect. Intercept. Enforce.**
 
-ARP uses two complementary detection layers:
+Runtime security monitoring for AI agents. Detects process spawns, network connections, and filesystem access in real-time — with zero-latency application-level interception that fires *before* the I/O happens.
 
-**OS-Level Monitors** (polling) — detect activity via system tools (`ps`, `lsof`, `fs.watch`):
-- `ProcessMonitor` — child process tracking, suspicious binary detection, CPU monitoring
-- `NetworkMonitor` — outbound connection tracking with fallback chain: `lsof` → `ss` → `/proc/net/tcp` → `netstat`
-- `FilesystemMonitor` — sensitive path access via recursive `fs.watch`
+[OpenA2A](https://opena2a.org) | [OASB Benchmark](https://github.com/opena2a-org/oasb) | [MITRE ATLAS Mapping](#mitre-atlas-mapping)
 
-**Application-Level Interceptors** (zero-latency) — hook Node.js built-in modules:
-- `ProcessInterceptor` — hooks `child_process.spawn/exec/execFile/fork`
-- `NetworkInterceptor` — hooks `net.Socket.prototype.connect`
-- `FilesystemInterceptor` — hooks `fs.readFile/writeFile/mkdir/unlink`
+---
 
-Interceptors fire **before** the I/O happens, with 100% accuracy and no kernel dependency.
+## Table of Contents
 
-**3-Layer Intelligence Stack:**
-- **L0** — Rule-based classification (free, every event)
-- **L1** — Statistical anomaly detection via z-score (free, flagged events)
-- **L2** — LLM-assisted assessment with budget control (supports Anthropic, OpenAI, Ollama)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Detection Coverage](#detection-coverage)
+- [Event Model](#event-model)
+- [MITRE ATLAS Mapping](#mitre-atlas-mapping)
+- [Testing](#testing)
+- [License](#license)
 
-**Enforcement Actions:** `log` → `alert` → `pause` (SIGSTOP) → `kill` (SIGTERM/SIGKILL)
+---
 
-## Installation
+## Quick Start
 
 ```bash
 npm install @opena2a/arp
 ```
-
-## Quick Start
 
 ### As SDK
 
@@ -52,7 +50,6 @@ const arp = new AgentRuntimeProtection({
   },
 });
 
-// Subscribe to events
 arp.onEvent((event) => {
   if (event.category === 'violation') {
     console.warn(`[ARP] ${event.severity}: ${event.description}`);
@@ -60,9 +57,7 @@ arp.onEvent((event) => {
 });
 
 await arp.start();
-
 // ... your agent runs ...
-
 await arp.stop();
 ```
 
@@ -76,9 +71,69 @@ npx arp-guard tail 20                  # Show last 20 events
 npx arp-guard budget                   # Show LLM spending
 ```
 
+---
+
+## Architecture
+
+ARP uses two complementary detection layers plus a 3-layer intelligence stack.
+
+### Detection Layers
+
+| Layer | Mechanism | Latency | Coverage |
+|-------|-----------|---------|----------|
+| **OS-Level Monitors** | Polling (`ps`, `lsof`, `fs.watch`) | 200–1000ms | Catches everything on the system |
+| **Application Interceptors** | Node.js module hooks | <1ms | Fires before I/O, 100% accuracy |
+
+<details>
+<summary>OS-Level Monitors</summary>
+
+| Monitor | What It Detects |
+|---------|-----------------|
+| `ProcessMonitor` | Child process tracking, suspicious binary detection, CPU monitoring |
+| `NetworkMonitor` | Outbound connections with fallback chain: `lsof` → `ss` → `/proc/net/tcp` → `netstat` |
+| `FilesystemMonitor` | Sensitive path access via recursive `fs.watch` |
+
+</details>
+
+<details>
+<summary>Application-Level Interceptors</summary>
+
+| Interceptor | Hooks | What It Catches |
+|-------------|-------|-----------------|
+| `ProcessInterceptor` | `child_process.spawn/exec/execFile/fork` | All child process creation |
+| `NetworkInterceptor` | `net.Socket.prototype.connect` | All outbound TCP connections |
+| `FilesystemInterceptor` | `fs.readFile/writeFile/mkdir/unlink` | All filesystem I/O |
+
+Interceptors fire **before** the operation executes. No kernel dependency required.
+
+</details>
+
+### Intelligence Stack
+
+| Layer | Method | Cost | When |
+|-------|--------|------|------|
+| **L0** | Rule-based classification | Free | Every event |
+| **L1** | Z-score anomaly detection | Free | Flagged events |
+| **L2** | LLM-assisted assessment | Budget-controlled | Escalated events |
+
+L2 supports Anthropic, OpenAI, and Ollama adapters with per-hour call limits and USD budget caps.
+
+### Enforcement Actions
+
+```
+log → alert → pause (SIGSTOP) → kill (SIGTERM/SIGKILL)
+```
+
+Each action is configurable per-rule with optional LLM confirmation before enforcement.
+
+---
+
 ## Configuration
 
 ARP auto-discovers config files: `arp.yaml` → `arp.yml` → `arp.json` → `.opena2a/arp.yaml`
+
+<details>
+<summary>Full configuration example</summary>
 
 ```yaml
 agentName: my-agent
@@ -139,13 +194,34 @@ intelligence:
   minSeverityForLlm: medium
 ```
 
-## What Gets Detected
+</details>
 
-**Suspicious Binaries:** `curl`, `wget`, `nc`, `ncat`, `nmap`, `ssh`, `scp`, `python`, `perl`, `ruby`, `base64`, `socat`, `telnet`, `ftp`, `rsync`
+---
 
-**Suspicious Hosts:** `webhook.site`, `requestbin`, `ngrok.io`, `pipedream.net`, `hookbin.com`, `burpcollaborator`, `interact.sh`, `oastify.com`, `pastebin.com`, `transfer.sh`
+## Detection Coverage
 
-**Sensitive Paths:** `.ssh`, `.aws`, `.gnupg`, `.kube`, `.config/gcloud`, `.docker/config.json`, `.npmrc`, `.pypirc`, `.git-credentials`, `wallet.json`, `.bashrc`, `.zshrc`, `.bash_profile`, `.profile`, `.gitconfig`, `.env`, `.netrc`, `.pgpass`
+<details>
+<summary>Suspicious binaries (15)</summary>
+
+`curl`, `wget`, `nc`, `ncat`, `nmap`, `ssh`, `scp`, `python`, `perl`, `ruby`, `base64`, `socat`, `telnet`, `ftp`, `rsync`
+
+</details>
+
+<details>
+<summary>Suspicious hosts (10)</summary>
+
+`webhook.site`, `requestbin`, `ngrok.io`, `pipedream.net`, `hookbin.com`, `burpcollaborator`, `interact.sh`, `oastify.com`, `pastebin.com`, `transfer.sh`
+
+</details>
+
+<details>
+<summary>Sensitive paths (18)</summary>
+
+`.ssh`, `.aws`, `.gnupg`, `.kube`, `.config/gcloud`, `.docker/config.json`, `.npmrc`, `.pypirc`, `.git-credentials`, `wallet.json`, `.bashrc`, `.zshrc`, `.bash_profile`, `.profile`, `.gitconfig`, `.env`, `.netrc`, `.pgpass`
+
+</details>
+
+---
 
 ## Event Model
 
@@ -162,17 +238,21 @@ interface ARPEvent {
 }
 ```
 
+---
+
 ## MITRE ATLAS Mapping
 
-| Technique | Description | Detection |
-|-----------|-------------|-----------|
-| AML.T0046 | Unsafe ML Inference | Process spawn/exec monitoring |
-| AML.T0057 | Data Leakage | Sensitive path + suspicious host detection |
-| AML.T0024 | Exfiltration | Outbound connection tracking |
-| AML.T0018 | Persistence | Shell config dotfile write detection |
-| AML.T0029 | Denial of Service | CPU monitoring, budget exhaustion |
-| AML.T0015 | Evasion | L1 anomaly baseline detection |
-| AML.T0054 | Jailbreak | L2 LLM consistency assessment |
+| Technique | ID | Detection |
+|-----------|----|-----------|
+| Unsafe ML Inference | AML.T0046 | Process spawn/exec monitoring |
+| Data Leakage | AML.T0057 | Sensitive path + suspicious host detection |
+| Exfiltration | AML.T0024 | Outbound connection tracking |
+| Persistence | AML.T0018 | Shell config dotfile write detection |
+| Denial of Service | AML.T0029 | CPU monitoring, budget exhaustion |
+| Evasion | AML.T0015 | L1 anomaly baseline detection |
+| Jailbreak | AML.T0054 | L2 LLM consistency assessment |
+
+---
 
 ## Testing
 
@@ -181,8 +261,25 @@ npm test          # 18 unit tests
 npm run build     # TypeScript compilation
 ```
 
-For comprehensive security testing, see [OASB](https://github.com/opena2a-org/oasb) (182 tests across 42 files, mapped to MITRE ATLAS).
+For comprehensive security testing, see [OASB](https://github.com/opena2a-org/oasb) — 182 attack scenarios across 42 test files mapped to MITRE ATLAS.
+
+---
 
 ## License
 
 Apache-2.0
+
+---
+
+## OpenA2A Ecosystem
+
+| Project | What it does |
+|---------|-------------|
+| [**ARP**](https://github.com/opena2a-org/arp) | Runtime security monitoring for AI agents |
+| [**OASB**](https://github.com/opena2a-org/oasb) | Open Agent Security Benchmark — 182 attack scenarios |
+| [**HackMyAgent**](https://github.com/opena2a-org/hackmyagent) | Security scanner — 147 checks, attack mode, auto-fix |
+| [**AIM**](https://github.com/opena2a-org/agent-identity-management) | Identity and access management for AI agents |
+| [**Secretless AI**](https://github.com/opena2a-org/secretless-ai) | Keep credentials out of AI context windows |
+| [**DVAA**](https://github.com/opena2a-org/damn-vulnerable-ai-agent) | Deliberately vulnerable AI agents for security training |
+
+[Website](https://opena2a.org) · [Discord](https://discord.gg/uRZa3KXgEn) · [Email](mailto:info@opena2a.org)
